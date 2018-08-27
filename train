@@ -1,0 +1,262 @@
+# -*- coding: utf-8 -*-  
+import os
+import keras
+from datetime import datetime
+from keras.utils import plot_model
+from keras.applications.resnet50 import ResNet50
+from keras.applications.vgg19 import VGG19
+from keras.applications.inception_v3 import InceptionV3
+from keras.applications.inception_resnet_v2 import InceptionResNetV2
+from keras.layers import Dense, Flatten, GlobalAveragePooling2D, BatchNormalization, Dropout, Activation
+from keras.models import Model, load_model
+from keras.optimizers import SGD, RMSprop, Adam
+from keras.preprocessing.image import ImageDataGenerator
+import matplotlib.pyplot as plt
+from PIL import ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+
+# 数据准备
+def setdatagen(dir_path, img_row, img_col, batch_size, is_train):
+    if is_train:
+        datagen = ImageDataGenerator(rescale=1. / 255, zoom_range=0.25, rotation_range=15.,
+                                     channel_shift_range=25., width_shift_range=0.02, height_shift_range=0.02,
+                                     horizontal_flip=True, fill_mode='constant')
+    else:
+        datagen = ImageDataGenerator(rescale=1. / 255)
+
+    generator = datagen.flow_from_directory(dir_path, target_size=(img_row, img_col),
+                                            batch_size=batch_size, shuffle=is_train)
+    return generator
+
+
+# ResNet模型
+def resnet50_model(lr=0.005, decay=1e-6, momentum=0.9, nb_classes=5, img_rows=224, img_cols=224, rgb=True,
+                   is_plot_model=False):
+    color = 3 if rgb else 1
+    base_model = ResNet50(weights='imagenet', include_top=False, pooling=None,
+                          input_shape=(img_rows, img_cols, color), classes=nb_classes)
+
+    # 冻结base_model所有层，这样就可以正确获得bottleneck特征
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    # 添加自己的全链接分类层
+    x = Flatten()(x)
+    # x = GlobalAveragePooling2D()(x)
+    # x = Dense(1024, activation='relu')(x)
+    predictions = Dense(nb_classes, activation='softmax')(x)
+
+    # 训练模型
+    model = Model(inputs=base_model.input, outputs=predictions)
+    sgd = SGD(lr=lr, decay=decay, momentum=momentum, nesterov=True)
+    model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
+
+    # 绘制模型
+    if is_plot_model:
+        plot_model(model, to_file='resnet50_model.png', show_shapes=True)
+
+    return model
+
+
+# InceptionResNetV2_model模型
+def inceptionresnetv2_model(nb_classes=4, img_rows=299, img_cols=299, rgb=True, is_plot_model=False):
+    color = 3 if rgb else 1
+    base_model = InceptionResNetV2(weights='imagenet', include_top=False, pooling=None,
+                                   input_shape=(img_rows, img_cols, color), classes=nb_classes)
+
+    # 冻结base_model所有层，这样就可以正确获得bottleneck特征
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    # 添加自己的全链接分类层
+    # x = Flatten()(x)
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(4096)(x)
+    x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+    x = Dense(4096)(x)
+    x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+    x = Dropout(0.5)(x)
+    predictions = Dense(nb_classes, activation='softmax')(x)
+
+    #
+    model = Model(inputs=base_model.input, outputs=predictions)
+    # sgd = SGD(lr=lr, decay=decay, momentum=momentum, nesterov=True)
+    sgd = Adam(lr=0.000001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+    model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
+
+    # 绘制模型
+    if is_plot_model:
+        plot_model(model, to_file='InceptionResNetV2_model.png', show_shapes=True)
+
+    return model
+
+
+# VGG模型
+def vgg19_model(lr=0.005, decay=1e-6, momentum=0.9, nb_classes=5, img_rows=224, img_cols=224, rgb=True,
+                is_plot_model=False):
+    color = 3 if rgb else 1
+    base_model = VGG19(weights='imagenet', include_top=False, pooling=None, input_shape=(img_rows, img_cols, color),
+                       classes=nb_classes)
+
+    # 冻结base_model所有层，这样就可以正确获得bottleneck特征
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    # 添加自己的全链接分类层
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(1024)(x)
+    x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+    x = Dropout(0.3)(x)
+    predictions = Dense(nb_classes, activation='softmax')(x)
+
+    # 训练模型
+    model = Model(inputs=base_model.input, outputs=predictions)
+    rms = RMSprop(lr=lr, decay=decay, momentum=momentum, nesterov=True)
+    model.compile(loss='categorical_crossentropy', optimizer=rms, metrics=['accuracy'])
+
+    # 绘图
+    if is_plot_model:
+        plot_model(model, to_file='vgg19_model.png', show_shapes=True)
+
+    return model
+
+
+# InceptionV3模型
+def inceptionv3_model(lr=0.005, decay=1e-6, momentum=0.9, nb_classes=5, img_rows=299, img_cols=299, rgb=True,
+                      is_plot_model=False):
+    color = 3 if rgb else 1
+    base_model = InceptionV3(weights='imagenet', include_top=False, pooling=None,
+                             input_shape=(img_rows, img_cols, color), classes=nb_classes)
+
+    # 冻结base_model所有层，这样就可以正确获得bottleneck特征;第二种方法开放一些层进行微调
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    # 添加自己的全链接分类层
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(1024, activation='relu')(x)
+    predictions = Dense(nb_classes, activation='softmax')(x)
+
+    # 训练模型
+    model = Model(inputs=base_model.input, outputs=predictions)
+    sgd = SGD(lr=lr, decay=decay, momentum=momentum, nesterov=True)
+    model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['accuracy'])
+
+    # 绘图
+    if is_plot_model:
+        plot_model(model, to_file='inception_v3_model.png', show_shapes=True)
+
+    return model
+
+
+# 训练模型
+def train_model(model, epochs, train_generator, steps_per_epoch, validation_generator, validation_steps,
+                model_url, is_load_model=False):
+    # 载入模型
+    if is_load_model and os.path.exists(model_url):
+        model = load_model(model_url)
+
+    history_ft = model.fit_generator(train_generator, steps_per_epoch=steps_per_epoch, epochs=epochs,
+                                     validation_data=validation_generator, validation_steps=validation_steps)
+    # 模型保存
+    model.save(model_url, overwrite=True)
+    return history_ft
+
+
+# 画图
+def plot_training(history):
+    acc = history.history['acc']
+    val_acc = history.history['val_acc']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    epochs = range(len(acc))
+    plt.plot(epochs, acc, 'b-', label='Training acc', linewidth=2)
+    plt.plot(epochs, val_acc, 'r-', label='Validation acc', linewidth=2)
+    plt.title('Training and validation accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.ylim((0, 1))
+
+    plt.legend()
+    plt.figure()
+
+    plt.plot(epochs, loss, 'b-', label='Training loss', linewidth=2)
+    plt.plot(epochs, val_loss, 'r-', label='Validation loss', linewidth=2)
+    plt.title('Training and validation loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.ylim((0, 4))
+
+    plt.legend()
+    plt.show()
+
+
+def save_date(epoc, traingen, vailgen, tim, content, filename, mode='a'):
+    # Try to save a list variable in txt file.
+    file = open(filename, mode)
+    epoch = content.epoch
+    acc = content.history['acc']
+    val_acc = content.history['val_acc']
+    loss = content.history['loss']
+    val_loss = content.history['val_loss']
+
+    file.write('epochs:' + str(epoc) + '\t' + 'traingenerator:' + str(traingen) + '\t' +
+               'validationgenerator:' + str(vailgen) + '\t' + 'runtime:' + str(tim) + '\n')
+    file.write('epoch\t' + 'acc\t' + 'val_acc\t' + 'loss\t' + 'val_loss\n')
+    for i in epoch:
+        file.write(str(epoch[i]) + '\t' + str(acc[i]) + '\t' + str(val_acc[i]) + '\t' +
+                   str(loss[i]) + '\t' + str(val_loss[i]) + '\n')
+    file.close()
+
+
+if __name__ == '__main__':
+    imagesize = 299
+    batchsize = 60
+    epoch_s = 300
+    traingenerat = 200
+    validationgenerat = 20
+
+    begintime = datetime.now()
+    # 得到数据
+    traingenerator = setdatagen('data1/train', imagesize, imagesize, batchsize, True)
+    validationgenerator = setdatagen('data1/validation', imagesize, imagesize, batchsize, False)
+
+    # VGG19
+    # mymodel = vgg19_model(nb_classes=5, img_rows=imagesize, img_cols=imagesize, is_plot_model=False)
+    # myhistory_ft = train_model(mymodel, 10, traingenerator, 600, validationgenerator, 60,
+    #                            'vgg19_model_weights.h5', is_load_model=False)
+
+    # ResNet50
+    # mymodel = resnet50_model(nb_classes=5, img_rows=imagesize, img_cols=imagesize, is_plot_model=False)
+    # myhistory_ft = train_model(mymodel, 10, traingenerator, 600, validationgenerator, 60,
+    #                            'resnet50_model_weights.h5', is_load_model=False)
+    
+    # InceptionResNetV2
+    mymodel = inceptionresnetv2_model(nb_classes=4, img_rows=imagesize, img_cols=imagesize, is_plot_model=False)
+    myhistory_ft = train_model(mymodel, epoch_s, traingenerator, traingenerat, validationgenerator, validationgenerat,
+                               'InceptionResNetV2_model_weights1.h5', is_load_model=False)
+    # InceptionV3
+    # mymodel = inceptionv3_model(nb_classes=5, img_rows=imagesize, img_cols=imagesize, is_plot_model=True)
+    # myhistory_ft = train_model(mymodel, 10, traingenerator, 600, validationgenerator, 60,
+    #                            'inception_v3_model_weights.h5', is_load_model=False)
+
+    endtime = datetime.now()
+    # datetime.strptime(str(a), "%Y-%m-%d %H:%M:%S.%f")
+    time = (endtime - begintime).seconds
+    # 文件名 日期+运行时间.date
+    datefile = endtime.strftime("%Y-%m%d_") + str(time) + '.date'
+
+    # 训练的acc_loss图
+    plot_training(myhistory_ft)
+    save_date(epoch_s, traingenerat, validationgenerat, time, myhistory_ft, 'InceptionResNetV2_outdate/' + datefile)
+
+    keras.callbacks.TensorBoard(log_dir='./logs', histogram_freq=1, write_graph=True, write_images=False)
